@@ -152,6 +152,8 @@ function trySplit(oid,dir){
   for(let i=0;i<balls.length;i++){
     const b=balls[i];
     if(b.id!==oid||b.o==='s'||b.mass<CFG.MinSplit||b.st>0)continue;
+    // 分身前先检查：原有球 + 已生成分身 + 即将生成的1个 = 总量 > 上限则停
+    if(cnt+nb.length+1>CFG.MaxPlayerBalls)break;
     const hm=b.mass*.5;if(hm<CFG.MinBallMass)continue;
     const or=b.r();
     b.mass=hm;b.st=CFG.SplitCD;b.mt=CFG.MergeDelay+or*CFG.MergeDelayRF;
@@ -165,7 +167,6 @@ function trySplit(oid,dir){
     pellets.forEach(p=>{if(!p.alive)return;if(p2seg({x:p.x,y:p.y},{x:sx,y:sy},{x:cl.x,y:cl.y})<cr){cl.mass+=CFG.PelletMass;p.alive=false;}});
     balls.forEach(sp=>{if(sp.o!=='s'||sp.mass<=0)return;if(p2seg({x:sp.x,y:sp.y},{x:sx,y:sy},{x:cl.x,y:cl.y})<cr){cl.mass+=sp.mass;sp.mass=0;}});
     nb.push(cl);
-    if(cnt+nb.length>=CFG.MaxPlayerBalls)break;
   }
   nb.forEach(x=>balls.push(x));
 }
@@ -340,8 +341,13 @@ function updateWorld(dt,tx,ty){
 function drawBall(x,y,r,c,n,isSpore,sk){
   ctx.save();ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.closePath();
   const hasSkin=sk>=0&&sk<imgs.length&&imgs[sk].complete&&!isSpore;
-  if(hasSkin){ctx.save();ctx.clip();ctx.drawImage(imgs[sk],x-r,y-r,r*2,r*2);ctx.globalAlpha=.15;ctx.fillStyle=c;ctx.fill();ctx.restore();}
-  ctx.fillStyle=c;ctx.fill();
+  if(hasSkin){
+    // 先用纯色打底，再贴皮肤纹理
+    ctx.fillStyle=c;ctx.fill();
+    ctx.save();ctx.clip();ctx.drawImage(imgs[sk],x-r,y-r,r*2,r*2);ctx.restore();
+  }else{
+    ctx.fillStyle=c;ctx.fill();
+  }
   ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=Math.max(1,r*.04);ctx.stroke();
   if(n&&r>18&&!isSpore){
     const fs=clp(r*.35,12,28);
@@ -416,11 +422,13 @@ function loop(ts){
 
     const pc=pCenter();
     const tx=pc.x+moveDir.x*500,ty=pc.y+moveDir.y*500;
+    // 按住 M 键连续吐球
+    if(keys.m&&pAlive())trySpit(0,moveDir);
     updateWorld(dt,tx,ty);
 
     const nc=pCenter();
     const m=pMass(),baseW=Math.max(W,1500),tz=clp(W/(baseW+m*0.25),.35,1.1);
-    zm+=(tz-zm)*Math.min(1,dt*3);
+    zm+=(tz-zm)*Math.min(1,dt*1.5);
     render(nc.x,nc.y,zm);
   }
 }
@@ -431,7 +439,6 @@ document.addEventListener('keydown',e=>{
   keys[e.key.toLowerCase()]=true;
   if(state==='playing'){
     if(e.key===' '){e.preventDefault();trySplit(0,moveDir);}
-    if(e.key.toLowerCase()==='m')trySpit(0,moveDir);
     if(e.key.toLowerCase()==='r'&&!pAlive())resetWorld();
     if(e.key==='Escape'){state='menu';document.getElementById('menu').classList.remove('hidden');}
   }
