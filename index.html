@@ -358,14 +358,14 @@ function cleanDead(){
 }
 
 function updateWorld(dt,tx,ty){
-  // 1. 更新玩家球（bots 由 updateBots 独立处理，避免双次更新）
+  // 1. 更新玩家球位置
   balls.forEach(b=>{if(b.ip)b.up(dt,tx,ty,true);else if(b.o==='s')b.up(dt,b.x,b.y,false);});
-  // 2. 同主人球相互作用（吸引/推挤，玩家和 bots 都参与）
-  sameOwnerInteract(dt);
-  // 3. AI 机器人（包含自身的 dt 更新）
-  updateBots(dt);
-  // 4. 碰撞检测
+  // 2. 碰撞检测（必须放在同主人推挤之前，否则分身位置被推偏导致70%覆盖失效）
   resolveCollisions();
+  // 3. 同主人球相互作用
+  sameOwnerInteract(dt);
+  // 4. AI 机器人
+  updateBots(dt);
   // 5. 合并
   resolveMerges();
   // 6. 清理 + 补充
