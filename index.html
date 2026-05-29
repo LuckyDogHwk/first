@@ -188,17 +188,37 @@ function trySpit(oid,dir){
 function absorbThorn(b,t){
   const tm=b.mass+t.mass;t.alive=false;
   const cx=b.x,cy=b.y,cc=b.c,ow=b.o,oid=b.id,nm=b.n,ip=b.ip,sk=b.sk;
+
+  // 统计该玩家当前球数（不含即将被移除的 b）
+  let curCnt=0;balls.forEach(x=>{if(x.id===oid&&x.o!=='s'&&x.mass>0)curCnt++;});
+  const slots=Math.max(0,CFG.MaxPlayerBalls-(curCnt-1)); // -1 因为 b 即将消失
   b.mass=0;
+
+  // 没空位了：直接吞噬不分裂，把质量全部还回当前球
+  if(slots<=0){
+    b.mass=tm; // 质量加回去，不分裂
+    return;
+  }
+
+  // 有空位：计算能创建几个球（1个中心 + 最多 slots-1 个分身）
+  const maxSplit=Math.min(CFG.ThornSplit,slots-1); // 留 1 个位置给中心球
+  const totalBalls=1+maxSplit;
+
+  // 按比例分配质量
   const mf=Math.min(1,(tm-10000)/50000);
   const cr=1/9+(.9-1/9)*Math.max(0,mf);
-  let cm=tm*cr,sm=(tm-cm)/CFG.ThornSplit;
-  cm=Math.max(cm,CFG.MinBallMass);sm=Math.max(sm,CFG.MinBallMass);
-  const sc=(cm+sm*CFG.ThornSplit)/tm;cm/=sc;sm/=sc;
+  let cm=tm*cr,sm=maxSplit>0?(tm-cm)/maxSplit:0;
+  cm=Math.max(cm,CFG.MinBallMass);if(sm>0)sm=Math.max(sm,CFG.MinBallMass);
+  if(maxSplit>0){const sc=(cm+sm*maxSplit)/tm;cm/=sc;sm/=sc;}
+
+  // 创建中心球
   const cb=new Ball(cx,cy,cm,cc,nm,ow,oid,ip,sk);
   cb.st=CFG.SplitCD;cb.mt=CFG.MergeDelay+cb.r()*CFG.MergeDelayRF;
   balls.push(cb);
-  for(let i=0;i<CFG.ThornSplit;i++){
-    const a=i*2*Math.PI/CFG.ThornSplit;
+
+  // 创建分身（最多 maxSplit 个）
+  for(let i=0;i<maxSplit;i++){
+    const a=i*2*Math.PI/maxSplit;
     const sb=new Ball(0,0,sm,cc,nm,ow,oid,ip,sk);
     sb.x=cx+Math.cos(a)*(cb.r()*2+massR(sm)+20);
     sb.y=cy+Math.sin(a)*(cb.r()*2+massR(sm)+20);
@@ -271,26 +291,36 @@ function resolveCollisions(){
   balls.forEach(b=>{if(b.st>0)return;pellets.forEach(p=>{if(!p.alive||!canEatBP(b))return;const dx=p.x-b.x,dy=p.y-b.y;if(dx*dx+dy*dy<b.r()*b.r())eatBP(b,p);});});
   // 球 ↔ 刺球
   balls.forEach(b=>{for(let i=0;i<thorns.length;i++){const t=thorns[i];if(!t.alive)continue;const dx=t.x-b.x,dy=t.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<b.r()+t.r()*.3&&canEatBT(b,t)){absorbThorn(b,t);break;}}});
-  // 球 ↔ 球
+  // 球 ↔ 球：先收集所有吃球对，再统一吞噬
+  const eats=[]; // {eater:index, prey:index}
   for(let i=0;i<balls.length;i++){
     for(let j=i+1;j<balls.length;j++){
       const a=balls[i],b=balls[j];
       if(a.mass<=0||b.mass<=0)continue;
       const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy);
-      // 同主人
+      // 同主人：只处理孢子回收
       if(a.id===b.id){
         const aS=a.o==='s',bS=b.o==='s';
-        if(aS!==bS){const bR=aS?b.r():a.r();if(d<bR+CFG.SporeR*.3){if(aS)eatBB(b,a);else eatBB(a,b);}}
+        if(aS!==bS){const bR=aS?b.r():a.r();if(d<bR+CFG.SporeR*.3)eats.push(aS?{e:j,p:i}:{e:i,p:j});}
         continue;
       }
       // 孢子互不吞
       if(a.o==='s'&&b.o==='s')continue;
       // 孢子被球吃
-      if(a.o==='s'||b.o==='s'){const bR=a.o==='s'?b.r():a.r();if(d<bR+CFG.SporeR*.3){if(a.o==='s')eatBB(b,a);else eatBB(a,b);}continue;}
+      if(a.o==='s'||b.o==='s'){const bR=a.o==='s'?b.r():a.r();if(d<bR+CFG.SporeR*.3)eats.push(a.o==='s'?{e:j,p:i}:{e:i,p:j});continue;}
       // 不同玩家吞噬
       const rs=a.r()+b.r(),od=rs*(1-CFG.EatOverlap);
-      if(d<od){if(canEatBB(a,b))eatBB(a,b);else if(canEatBB(b,a))eatBB(b,a);}
+      if(d<od){
+        if(canEatBB(a,b))eats.push({e:i,p:j});
+        else if(canEatBB(b,a))eats.push({e:j,p:i});
+      }
     }
+  }
+  // 统一执行吞噬（按吞噬者分组，先累加质量再清空被吃者）
+  for(const ep of eats){
+    const eater=balls[ep.e],prey=balls[ep.p];
+    if(prey.mass<=0)continue; // 已被其他人吃了
+    eater.mass+=prey.mass;prey.mass=0;
   }
 }
 
