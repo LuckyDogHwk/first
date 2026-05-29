@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>球球大作战 - 在线试玩</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#111;overflow:hidden;font-family:'Microsoft YaHei','SimHei',sans-serif;}
+canvas{display:block;}
+#menu{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:auto;}
+#menu.hidden{display:none;}
+.menu-bg{position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,#1a3a5c 0%,#0a1525 100%);pointer-events:none;}
+.menu-content{position:relative;z-index:1;text-align:center;}
+.menu-title{font-size:64px;color:#64b4ff;font-weight:bold;text-shadow:0 4px 12px rgba(0,0,0,0.5);margin-bottom:6px;}
+.menu-subtitle{font-size:16px;color:#6a8aaa;margin-bottom:36px;}
+.menu-label{font-size:18px;color:#bbb;margin-bottom:8px;}
+.name-input{width:300px;padding:12px 16px;font-size:20px;border:2px solid #446;border-radius:8px;background:#1a2a3a;color:#fff;text-align:center;outline:none;transition:border-color .3s;pointer-events:auto;}
+.name-input:focus{border-color:#64b4ff;}
+.skin-label{font-size:16px;color:#bbb;margin:28px 0 10px;}
+.skin-list{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+.skin-item{width:80px;height:80px;border-radius:12px;border:3px solid #334;cursor:pointer;overflow:hidden;transition:all .3s;background:#1a2a3a;pointer-events:auto;}
+.skin-item:hover{border-color:#64b4ff;transform:scale(1.1);}
+.skin-item.selected{border-color:#4c4;box-shadow:0 0 16px rgba(100,200,100,0.5);}
+.skin-item img{width:100%;height:100%;object-fit:cover;pointer-events:none;}
+.skin-none{width:80px;height:80px;border-radius:12px;border:3px solid #334;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#666;font-size:14px;transition:all .3s;background:#1a2a3a;pointer-events:auto;}
+.skin-none:hover{border-color:#64b4ff;}
+.skin-none.selected{border-color:#4c4;color:#4c4;box-shadow:0 0 16px rgba(100,200,100,0.5);}
+.btn-start{margin-top:28px;padding:14px 60px;font-size:26px;color:#fff;background:linear-gradient(135deg,#50b878,#3a9058);border:none;border-radius:12px;cursor:pointer;font-weight:bold;transition:all .3s;box-shadow:0 4px 16px rgba(80,184,120,0.4);pointer-events:auto;}
+.btn-start:hover{background:linear-gradient(135deg,#60c888,#4aa068);transform:translateY(-2px);box-shadow:0 6px 24px rgba(80,184,120,0.6);}
+.hint{color:#556;font-size:13px;margin-top:20px;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="menu"><div class="menu-bg"></div><div class="menu-content">
+<div class="menu-title">球球大作战</div>
+<div class="menu-subtitle">C++ / SFML 游戏引擎 · WebAssembly 在线试玩</div>
+<div class="menu-label">昵称</div>
+<input type="text" class="name-input" id="nameInput" value="你" maxlength="10" placeholder="输入昵称">
+<div class="skin-label">选择皮肤</div>
+<div class="skin-list" id="skinList"></div>
+<button class="btn-start" id="btnStart">开始游戏</button>
+<div class="hint">WASD 移动 &nbsp;|&nbsp; 空格 分身 &nbsp;|&nbsp; M 吐球 &nbsp;|&nbsp; R 重开 &nbsp;|&nbsp; ESC 返回</div>
+</div></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  球球大作战 — HTML5 网页版
+//  原项目: C++17 + SFML 2.6 游戏引擎
+//  本页面由 Emscripten 编译目标替代方案实现
+// ═══════════════════════════════════════════════════════
+
+const CFG={
+  WorldW:5000,WorldH:5000,
+  PelletCount:1500,PelletR:5,PelletMass:50,
+  ThornBallBig:5,ThornBallSmall:30,
+  ThornMassBig:8800,ThornMassSmall:6600,ThornSplit:8,
+  SporeR:8,SporeMass:300,SporeDist:80,
+  MinBallMass:1000,PlayerStart:1800,MinSplit:1600,
+  MinSpitMass:500,SpitCost:400,
+  BaseSpeed:95,SpeedRefR:35,MaxSpeed:180,
+  SpitSpeed:180,SplitSpeed:220,
+  SplitCD:.5,SpitCD:.08,MergeDelay:8,MergeDelayRF:.15,
+  EatOverlap:.70,MaxPlayerBalls:16,
+  BotCount:12,BotMassMin:1200,BotMassMax:3500,EatRatio:1.15
+};
+
+// ═══════════════ MATH ═══════════════
+function massR(m){return Math.sqrt(Math.max(m,0)/Math.PI);}
+function len(v){return Math.sqrt(v.x*v.x+v.y*v.y);}
+function nrm(v){const l=len(v);return l<1e-5?{x:0,y:0}:{x:v.x/l,y:v.y/l};}
+function clp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function p2seg(p,a,b){
+  const ab={x:b.x-a.x,y:b.y-a.y},ap={x:p.x-a.x,y:p.y-a.y};
+  const l2=ab.x*ab.x+ab.y*ab.y;
+  if(l2<1e-5)return len(ap);
+  return len({x:ap.x-ab.x*clp((ap.x*ab.x+ap.y*ab.y)/l2,0,1),y:ap.y-ab.y*clp((ap.x*ab.x+ap.y*ab.y)/l2,0,1)});
+}
+function rndClr(s){
+  const h=((s*1103515245+12345)>>>0)%360;
+  const c=.65*.92,x=c*(1-Math.abs((h/60)%2-1)),m=.92-c;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+  return `rgb(${~~((r+m)*255)},${~~((g+m)*255)},${~~((b+m)*255)})`;
+}
+
+// ═══════════════ STATE ═══════════════
+let pellets=[],thorns=[],balls=[];
+let nextBid=0,seed=42;
+let pName='你',skin=-1;
+let state='menu',mv={x:0,y:0},keys={};
+
+// ═══════════════ RNG ═══════════════
+function rng(){seed=(seed*1103515245+12345)|0;return((seed>>>0)/4294967296);}
+function rr(lo,hi){return lo+rng()*(hi-lo);}
+
+// ═══════════════ OBJECTS ═══════════════
+class Pellet{constructor(x,y){this.x=x;this.y=y;this.alive=true;this.c=rndClr(rng()*1e9|0);}}
+class Thorn{constructor(x,y,big){this.x=x;this.y=y;this.alive=true;this.mass=big?CFG.ThornMassBig:CFG.ThornMassSmall;}r(){return massR(this.mass);}}
+class Ball{
+  constructor(x,y,m,c,n,o,id,ip,sk){
+    this.x=x;this.y=y;this.vx=0;this.vy=0;
+    this.mass=m;this.c=c;this.n=n;
+    this.o=o;this.id=id;this.ip=ip;
+    this.st=0;this.pt=0;this.mt=0;
+    this.sd=0;this.sk=sk;
+  }
+  r(){return this.o==='s'?CFG.SporeR:massR(this.mass);}
+  spd(){const r=Math.max(this.r(),12);return Math.min(CFG.BaseSpeed*Math.pow(CFG.SpeedRefR/r,.65),CFG.MaxSpeed);}
+  up(dt,tx,ty,ctrl){
+    this.st=Math.max(0,this.st-dt);this.pt=Math.max(0,this.pt-dt);this.mt=Math.max(0,this.mt-dt);
+    if(ctrl){
+      const dx=tx-this.x,dy=ty-this.y,d=Math.sqrt(dx*dx+dy*dy)||1e-5;
+      const s=this.spd(),f=Math.min(1,dt*5);
+      this.vx+=(dx/d*s-this.vx)*f;this.vy+=(dy/d*s-this.vy)*f;
+    }
+    if(this.o==='s'){
+      this.sd+=Math.sqrt(this.vx*this.vx+this.vy*this.vy)*dt;
+      if(this.sd>=CFG.SporeDist){this.vx=0;this.vy=0;}
+    }
+    this.x+=this.vx*dt;this.y+=this.vy*dt;
+    const r=this.r();
+    this.x=clp(this.x,r,CFG.WorldW-r);this.y=clp(this.y,r,CFG.WorldH-r);
+    if(!ctrl&&this.o!=='s'){const d=Math.pow(.05,dt);this.vx*=d;this.vy*=d;}
+  }
+}
+
+// ═══════════════ WORLD ═══════════════
+function spawnPellets(){pellets=[];for(let i=0;i<CFG.PelletCount;i++)pellets.push(new Pellet(rr(20,CFG.WorldW-20),rr(20,CFG.WorldH-20)));}
+function spawnThorns(){thorns=[];for(let i=0;i<CFG.ThornBallBig+CFG.ThornBallSmall;i++)thorns.push(new Thorn(rr(100,CFG.WorldW-100),rr(100,CFG.WorldH-100),i<CFG.ThornBallBig));}
+function spawnPlayer(){balls.push(new Ball(CFG.WorldW/2,CFG.WorldH/2,CFG.PlayerStart,'#46a0ff',pName,'p',0,true,skin));}
+function spawnBots(){
+  const ns=['小红','大蓝','绿巨人','闪电','影子','糖果','风暴','火箭','幽灵','王者','新手','猎手'];
+  for(let i=0;i<CFG.BotCount;i++)balls.push(new Ball(rr(100,CFG.WorldW-100),rr(100,CFG.WorldH-100),rr(CFG.BotMassMin,CFG.BotMassMax),rndClr(rng()*1e9+i*17|0),ns[i%12],'b',++nextBid,false,-1));
+}
+function resetWorld(){seed=Math.random()*1e9|0;balls=[];nextBid=0;spawnPellets();spawnThorns();spawnPlayer();spawnBots();}
+function pBalls(){return balls.filter(b=>b.ip);}
+function pCenter(){const pb=pBalls();if(!pb.length)return{x:CFG.WorldW/2,y:CFG.WorldH/2};let sx=0,sy=0;pb.forEach(b=>{sx+=b.x;sy+=b.y;});return{x:sx/pb.length,y:sy/pb.length};}
+function pMass(){let t=0;balls.forEach(b=>{if(b.ip)t+=b.mass;});return t;}
+function pAlive(){return balls.some(b=>b.ip);}
+function canEatBB(a,b){return a.id!==b.id&&a.mass>b.mass*CFG.EatRatio;}
+function canEatBP(b){return b.mass>CFG.PelletMass;}
+function canEatBT(b,t){return b.mass>t.mass*CFG.EatRatio;}
+function eatBB(a,b){a.mass+=b.mass;b.mass=0;}
+function eatBP(b,p){b.mass+=CFG.PelletMass;p.alive=false;}
+
+function trySplit(oid,dir){
+  const nd=nrm(dir),nb=[];
+  let cnt=0;balls.forEach(b=>{if(b.id===oid&&b.o!=='s')cnt++;});
+  const ip=(oid===0&&balls.some(b=>b.id===0&&b.ip));
+  for(let i=0;i<balls.length;i++){
+    const b=balls[i];
+    if(b.id!==oid||b.o==='s'||b.mass<CFG.MinSplit||b.st>0)continue;
+    const hm=b.mass*.5;if(hm<CFG.MinBallMass)continue;
+    const or=b.r();
+    b.mass=hm;b.st=CFG.SplitCD;b.mt=CFG.MergeDelay+or*CFG.MergeDelayRF;
+    b.x-=nd.x*or*.5;b.y-=nd.y*or*.5;
+    const cl=new Ball(b.x,b.y,hm,b.c,b.n,b.o,b.id,ip,b.sk);
+    const sx=cl.x,sy=cl.y;
+    cl.x+=nd.x*or*3;cl.y+=nd.y*or*3;
+    cl.vx=nd.x*CFG.SplitSpeed;cl.vy=nd.y*CFG.SplitSpeed;
+    cl.st=CFG.SplitCD;cl.mt=CFG.MergeDelay+or*CFG.MergeDelayRF;
+    const cr=cl.r();
+    pellets.forEach(p=>{if(!p.alive)return;if(p2seg({x:p.x,y:p.y},{x:sx,y:sy},{x:cl.x,y:cl.y})<cr){cl.mass+=CFG.PelletMass;p.alive=false;}});
+    balls.forEach(sp=>{if(sp.o!=='s'||sp.mass<=0)return;if(p2seg({x:sp.x,y:sp.y},{x:sx,y:sy},{x:cl.x,y:cl.y})<cr){cl.mass+=sp.mass;sp.mass=0;}});
+    nb.push(cl);
+    if(cnt+nb.length>=CFG.MaxPlayerBalls)break;
+  }
+  nb.forEach(x=>balls.push(x));
+}
+
+function trySpit(oid,dir){
+  const nd=nrm(dir);
+  for(let i=0;i<balls.length;i++){
+    const b=balls[i];
+    if(b.id!==oid||b.o==='s'||b.pt>0||b.mass<CFG.MinBallMass+CFG.SporeMass)continue;
+    const br=b.r();
+    b.mass-=CFG.SporeMass;b.pt=CFG.SpitCD;
+    const sp=new Ball(0,0,CFG.SporeMass,b.c,'','s',oid,false,-1);
+    sp.x=b.x+nd.x*(br+CFG.SporeR);sp.y=b.y+nd.y*(br+CFG.SporeR);
+    sp.vx=nd.x*CFG.SpitSpeed;sp.vy=nd.y*CFG.SpitSpeed;
+    balls.push(sp);
+  }
+}
+
+function absorbThorn(b,t){
+  const tm=b.mass+t.mass;t.alive=false;
+  const cx=b.x,cy=b.y,cc=b.c,ow=b.o,oid=b.id,nm=b.n,ip=b.ip,sk=b.sk;
+  b.mass=0;
+  const mf=Math.min(1,(tm-10000)/50000);
+  const cr=1/9+(.9-1/9)*Math.max(0,mf);
+  let cm=tm*cr,sm=(tm-cm)/CFG.ThornSplit;
+  cm=Math.max(cm,CFG.MinBallMass);sm=Math.max(sm,CFG.MinBallMass);
+  const sc=(cm+sm*CFG.ThornSplit)/tm;cm/=sc;sm/=sc;
+  const cb=new Ball(cx,cy,cm,cc,nm,ow,oid,ip,sk);
+  cb.st=CFG.SplitCD;cb.mt=CFG.MergeDelay+cb.r()*CFG.MergeDelayRF;
+  balls.push(cb);
+  for(let i=0;i<CFG.ThornSplit;i++){
+    const a=i*2*Math.PI/CFG.ThornSplit;
+    const sb=new Ball(0,0,sm,cc,nm,ow,oid,ip,sk);
+    sb.x=cx+Math.cos(a)*(cb.r()*2+massR(sm)+20);
+    sb.y=cy+Math.sin(a)*(cb.r()*2+massR(sm)+20);
+    sb.vx=Math.cos(a)*CFG.SplitSpeed*2.5;sb.vy=Math.sin(a)*CFG.SplitSpeed*2.5;
+    sb.st=CFG.SplitCD;sb.mt=CFG.MergeDelay+sb.r()*CFG.MergeDelayRF;
+    balls.push(sb);
+  }
+}
+
+function updateBots(dt){
+  const bc={},bp={};
+  balls.forEach(b=>{if(b.o!=='b'||b.mass<=0)return;bc[b.id]=(bc[b.id]||0)+1;if(!bp[b.id])bp[b.id]={x:0,y:0};bp[b.id].x+=b.x;bp[b.id].y+=b.y;});
+  for(const k in bp){if(bc[k]>0){bp[k].x/=bc[k];bp[k].y/=bc[k];}}
+  balls.forEach(b=>{
+    if(b.o!=='b')return;
+    b.st=Math.max(0,b.st-dt);b.pt=Math.max(0,b.pt-dt);b.mt=Math.max(0,b.mt-dt);
+    let tx=b.x,ty=b.y;
+    // 多分身时聚拢
+    if((bc[b.id]||0)>1){
+      tx=bp[b.id].x+(Math.random()-.5)*40;ty=bp[b.id].y+(Math.random()-.5)*40;
+      const dx=tx-b.x,dy=ty-b.y,d=Math.sqrt(dx*dx+dy*dy)||1e-5;
+      const s=b.spd(),f=Math.min(1,dt*5);
+      b.vx+=(dx/d*s-b.vx)*f;b.vy+=(dy/d*s-b.vy)*f;
+      b.x+=b.vx*dt;b.y+=b.vy*dt;
+      const r=b.r();b.x=clp(b.x,r,CFG.WorldW-r);b.y=clp(b.y,r,CFG.WorldH-r);
+      if(b.o!=='s'){const d=Math.pow(.05,dt);b.vx*=d;b.vy*=d;}
+      return;
+    }
+    // AI 寻路
+    let bd=1e9;
+    pellets.forEach(p=>{if(!p.alive)return;const dx=p.x-b.x,dy=p.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<bd){bd=d;tx=p.x;ty=p.y;}});
+    thorns.forEach(t=>{if(!t.alive||!canEatBT(b,t))return;const dx=t.x-b.x,dy=t.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<800&&d<bd){bd=d;tx=t.x;ty=t.y;}});
+    balls.forEach(o=>{
+      if(o===b||o.mass<=0)return;
+      if(canEatBB(b,o)){const dx=o.x-b.x,dy=o.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<600&&d<bd){bd=d;tx=o.x;ty=o.y;}}
+      else if(canEatBB(o,b)){const dx=o.x-b.x,dy=o.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<b.r()*3){const nd=nrm({x:b.x-o.x,y:b.y-o.y});tx=b.x+nd.x*200;ty=b.y+nd.y*200;bd=0;}}
+    });
+    tx+=(Math.random()-.5)*80;ty+=(Math.random()-.5)*80;
+    const dx=tx-b.x,dy=ty-b.y,d=Math.sqrt(dx*dx+dy*dy)||1e-5;
+    const s=b.spd(),f=Math.min(1,dt*5);
+    b.vx+=(dx/d*s-b.vx)*f;b.vy+=(dy/d*s-b.vy)*f;
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    const r=b.r();b.x=clp(b.x,r,CFG.WorldW-r);b.y=clp(b.y,r,CFG.WorldH-r);
+    if(b.o!=='s'){const d=Math.pow(.05,dt);b.vx*=d;b.vy*=d;}
+  });
+}
+
+function sameOwnerInteract(dt){
+  for(let i=0;i<balls.length;i++){
+    for(let j=i+1;j<balls.length;j++){
+      const a=balls[i],b=balls[j];
+      if(a.id!==b.id||a.o==='s'||b.o==='s'||a.mass<=0||b.mass<=0)continue;
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||1e-5;
+      const rs=a.r()+b.r();
+      if(d<rs+10){
+        if(a.mt>0||b.mt>0){
+          if(d<rs){const push=(rs-d)*.5;a.x-=dx/d*push;a.y-=dy/d*push;b.x+=dx/d*push;b.y+=dy/d*push;}
+          const avx=(a.vx+b.vx)*.5,avy=(a.vy+b.vy)*.5;a.vx=avx;a.vy=avy;b.vx=avx;b.vy=avy;
+        }
+      }else if(d<200){
+        const str=20,f=Math.min(1,dt*3);
+        a.vx+=dx/d*str*f;a.vy+=dy/d*str*f;b.vx-=dx/d*str*f;b.vy-=dy/d*str*f;
+      }
+    }
+  }
+}
+
+function resolveCollisions(){
+  // 球 ↔ 彩豆
+  balls.forEach(b=>{if(b.st>0)return;pellets.forEach(p=>{if(!p.alive||!canEatBP(b))return;const dx=p.x-b.x,dy=p.y-b.y;if(dx*dx+dy*dy<b.r()*b.r())eatBP(b,p);});});
+  // 球 ↔ 刺球
+  balls.forEach(b=>{for(let i=0;i<thorns.length;i++){const t=thorns[i];if(!t.alive)continue;const dx=t.x-b.x,dy=t.y-b.y,d=Math.sqrt(dx*dx+dy*dy);if(d<b.r()+t.r()*.3&&canEatBT(b,t)){absorbThorn(b,t);break;}}});
+  // 球 ↔ 球
+  for(let i=0;i<balls.length;i++){
+    for(let j=i+1;j<balls.length;j++){
+      const a=balls[i],b=balls[j];
+      if(a.mass<=0||b.mass<=0)continue;
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy);
+      // 同主人
+      if(a.id===b.id){
+        const aS=a.o==='s',bS=b.o==='s';
+        if(aS!==bS){const bR=aS?b.r():a.r();if(d<bR+CFG.SporeR*.3){if(aS)eatBB(b,a);else eatBB(a,b);}}
+        continue;
+      }
+      // 孢子互不吞
+      if(a.o==='s'&&b.o==='s')continue;
+      // 孢子被球吃
+      if(a.o==='s'||b.o==='s'){const bR=a.o==='s'?b.r():a.r();if(d<bR+CFG.SporeR*.3){if(a.o==='s')eatBB(b,a);else eatBB(a,b);}continue;}
+      // 不同玩家吞噬
+      const rs=a.r()+b.r(),od=rs*(1-CFG.EatOverlap);
+      if(d<od){if(canEatBB(a,b))eatBB(a,b);else if(canEatBB(b,a))eatBB(b,a);}
+    }
+  }
+}
+
+function resolveMerges(){
+  const mIdx=[];balls.forEach((b,i)=>{if(b.mt<=0&&b.mass>0)mIdx.push(i);});
+  if(mIdx.length<2)return;
+  mIdx.sort((a,b)=>balls[a].mass-balls[b].mass);
+  const merged=new Array(balls.length).fill(false);
+  for(const idx of mIdx){
+    if(merged[idx])continue;
+    const a=balls[idx];let cd=1e9,ci=-1;
+    for(const oi of mIdx){
+      if(oi===idx||merged[oi])continue;
+      if(a.id!==balls[oi].id)continue;
+      if(a.o==='s'&&balls[oi].o==='s')continue;
+      const dx=balls[oi].x-a.x,dy=balls[oi].y-a.y,d=Math.sqrt(dx*dx+dy*dy);
+      const rs=a.r()+balls[oi].r();
+      if(d<rs*(1-CFG.EatOverlap)&&d<cd){cd=d;ci=oi;}
+    }
+    if(ci>=0){if(a.mass>=balls[ci].mass)eatBB(a,balls[ci]);else eatBB(balls[ci],a);merged[idx]=true;merged[ci]=true;}
+  }
+}
+
+function cleanDead(){
+  balls=balls.filter(b=>{if(b.mass<=0)return false;if(b.o==='s')return true;return b.mass>=CFG.MinBallMass;});
+  pellets=pellets.filter(p=>p.alive);
+  thorns=thorns.filter(t=>t.alive);
+  while(pellets.length<CFG.PelletCount)pellets.push(new Pellet(rr(20,CFG.WorldW-20),rr(20,CFG.WorldH-20)));
+  while(thorns.length<CFG.ThornBallBig+CFG.ThornBallSmall)thorns.push(new Thorn(rr(100,CFG.WorldW-100),rr(100,CFG.WorldH-100),rng()<.25));
+}
+
+function updateWorld(dt,tx,ty){
+  // 1. 更新玩家球（bots 由 updateBots 独立处理，避免双次更新）
+  balls.forEach(b=>{if(b.ip)b.up(dt,tx,ty,true);else if(b.o==='s')b.up(dt,b.x,b.y,false);});
+  // 2. 同主人球相互作用（吸引/推挤，玩家和 bots 都参与）
+  sameOwnerInteract(dt);
+  // 3. AI 机器人（包含自身的 dt 更新）
+  updateBots(dt);
+  // 4. 碰撞检测
+  resolveCollisions();
+  // 5. 合并
+  resolveMerges();
+  // 6. 清理 + 补充
+  cleanDead();
+}
+
+// ═══════════════ RENDER ═══════════════
+function drawBall(x,y,r,c,n,isSpore,sk){
+  ctx.save();ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.closePath();
+  if(sk>=0&&sk<imgs.length&&imgs[sk].complete&&!isSpore){ctx.save();ctx.clip();ctx.drawImage(imgs[sk],x-r,y-r,r*2,r*2);ctx.globalAlpha=.15;ctx.fillStyle=c;ctx.fill();ctx.restore();}
+  else ctx.fillStyle=c;
+  ctx.fill();ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=Math.max(1,r*.04);ctx.stroke();
+  if(n&&r>18&&!isSpore){
+    const fs=clp(r*.35,12,28);
+    ctx.font=`bold ${fs}px "Microsoft YaHei","SimHei",sans-serif`;
+    ctx.fillStyle='#fff';ctx.strokeStyle='rgba(0,0,0,.7)';ctx.lineWidth=1;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.strokeText(n,x,y);ctx.fillText(n,x,y);
+  }
+  ctx.restore();
+}
+function drawThorn(x,y,r){
+  ctx.save();const sp=12;ctx.beginPath();
+  for(let i=0;i<sp*2;i++){const a=i*Math.PI/sp-Math.PI/2,rr=i%2===0?r:r*.7;if(i===0)ctx.moveTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);else ctx.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);}
+  ctx.closePath();
+  const g=ctx.createRadialGradient(x-r*.3,y-r*.3,0,x,y,r);g.addColorStop(0,'#aaff80');g.addColorStop(1,'#3a8030');
+  ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=2;ctx.stroke();ctx.restore();
+}
+
+function render(cx,cy,zm){
+  ctx.fillStyle='#1c2026';ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.translate(W/2,H/2);ctx.scale(zm,zm);ctx.translate(-cx,-cy);
+  // Grid
+  const gs=200;ctx.strokeStyle='rgba(255,255,255,.04)';ctx.lineWidth=1;
+  const sx=Math.floor((cx-W/2/zm)/gs)*gs,sy=Math.floor((cy-H/2/zm)/gs)*gs;
+  for(let x=sx;x<cx+W/2/zm;x+=gs){ctx.beginPath();ctx.moveTo(x,sy);ctx.lineTo(x,cy+H/2/zm);ctx.stroke();}
+  for(let y=sy;y<cy+H/2/zm;y+=gs){ctx.beginPath();ctx.moveTo(sx,y);ctx.lineTo(cx+W/2/zm,y);ctx.stroke();}
+  // World border
+  ctx.strokeStyle='rgba(255,100,100,.6)';ctx.lineWidth=4;ctx.strokeRect(0,0,CFG.WorldW,CFG.WorldH);
+  // Pellets
+  pellets.forEach(p=>{if(!p.alive)return;ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,CFG.PelletR,0,Math.PI*2);ctx.fill();});
+  // Balls + thorns (layer order)
+  let atr=0;thorns.forEach(t=>{if(t.alive)atr+=t.r();});
+  const avgR=thorns.filter(t=>t.alive).length?atr/thorns.filter(t=>t.alive).length:50;
+  const sb=[],lb=[];balls.forEach(b=>{if(b.mass<=0)return;(b.r()<avgR?sb:lb).push(b);});
+  sb.sort((a,b)=>a.r()-b.r());lb.sort((a,b)=>a.r()-b.r());
+  sb.forEach(b=>drawBall(b.x,b.y,b.r(),b.c,b.n,b.o==='s',b.sk));
+  thorns.forEach(t=>{if(t.alive)drawThorn(t.x,t.y,t.r());});
+  lb.forEach(b=>drawBall(b.x,b.y,b.r(),b.c,b.n,b.o==='s',b.sk));
+  ctx.restore();
+  // HUD
+  ctx.fillStyle='#fff';ctx.font='16px "Microsoft YaHei","SimHei",sans-serif';ctx.textAlign='left';
+  ctx.fillText(`质量: ${~~pMass()}`,16,28);
+  // Leaderboard
+  const entries=[];balls.forEach(b=>{if(b.mass<=0)return;let e=entries.find(x=>x.id===b.id);if(!e){e={n:b.n||'???',id:b.id,m:0,ip:b.ip};entries.push(e);}e.m+=b.mass;});
+  entries.sort((a,b)=>b.m-a.m);const t10=entries.slice(0,10);
+  if(t10.length){
+    const bw=170,bh=30+t10.length*22,bx=W-bw-12,by=12;
+    ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(bx,by,bw,bh);ctx.strokeStyle='rgba(100,100,100,.4)';ctx.lineWidth=1;ctx.strokeRect(bx,by,bw,bh);
+    ctx.fillStyle='#ffd700';ctx.font='bold 15px "Microsoft YaHei","SimHei",sans-serif';ctx.fillText('排行榜',bx+8,by+24);
+    ctx.font='13px "Microsoft YaHei","SimHei",sans-serif';t10.forEach((e,i)=>{ctx.fillStyle=e.ip?'#ffdc64':'#ccc';ctx.fillText(`${i+1}. ${e.n}: ${~~e.m}`,bx+8,by+48+i*22);});
+  }
+  // Help
+  const hs=['WASD: 移动','空格: 分身(最多16个)','M: 吐球','R: 重开','ESC: 返回菜单'];
+  ctx.font='13px "Microsoft YaHei","SimHei",sans-serif';ctx.textAlign='left';
+  hs.forEach((t,i)=>{ctx.fillStyle='rgba(200,200,200,.75)';ctx.fillText(t,16,H-108+i*20);});
+  // Game over
+  if(!pAlive()){ctx.fillStyle='#ff5a5a';ctx.font='bold 24px "Microsoft YaHei","SimHei",sans-serif';ctx.textAlign='center';ctx.fillText('你被吃掉了! 按 R 重新开始，ESC 返回菜单',W/2,H/2);}
+}
+
+// ═══════════════ LOOP ═══════════════
+let lt=0,zm=1;
+
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!lt)lt=ts;
+  let dt=Math.min((ts-lt)/1000,.05);if(dt<=0)dt=.016;lt=ts;
+
+  if(state==='playing'){
+    mv={x:0,y:0};
+    if(keys.w||keys.arrowup)mv.y-=1;if(keys.s||keys.arrowdown)mv.y+=1;
+    if(keys.a||keys.arrowleft)mv.x-=1;if(keys.d||keys.arrowright)mv.x+=1;
+    moveDir=nrm(mv);
+
+    const pc=pCenter();
+    const tx=pc.x+moveDir.x*500,ty=pc.y+moveDir.y*500;
+    updateWorld(dt,tx,ty);
+
+    const nc=pCenter();
+    const tz=clp(1/(pMass()/2000+1),.3,1.2);
+    zm+=(tz-zm)*Math.min(1,dt*3);
+    render(nc.x,nc.y,zm);
+  }
+}
+
+// ═══════════════ INPUT ═══════════════
+let moveDir={x:0,y:0};
+document.addEventListener('keydown',e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(state==='playing'){
+    if(e.key===' '){e.preventDefault();trySplit(0,moveDir);}
+    if(e.key.toLowerCase()==='m')trySpit(0,moveDir);
+    if(e.key.toLowerCase()==='r'&&!pAlive())resetWorld();
+    if(e.key==='Escape'){state='menu';document.getElementById('menu').classList.remove('hidden');}
+  }
+});
+document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+// ═══════════════ MENU ═══════════════
+const imgs=[];
+function initMenu(){
+  const sl=document.getElementById('skinList');sl.innerHTML='';
+  const nd=document.createElement('div');nd.className='skin-none'+(skin===-1?' selected':'');nd.textContent='无皮肤';
+  nd.onclick=()=>{skin=-1;initMenu();};sl.appendChild(nd);
+  imgs.forEach((img,i)=>{
+    const d=document.createElement('div');d.className='skin-item'+(skin===i?' selected':'');
+    d.innerHTML=`<img src="${img.src}" alt="皮肤${i+1}">`;
+    d.onclick=()=>{skin=(skin===i)?-1:i;initMenu();};sl.appendChild(d);
+  });
+}
+document.getElementById('btnStart').onclick=()=>{
+  pName=document.getElementById('nameInput').value||'你';
+  document.getElementById('menu').classList.add('hidden');
+  resetWorld();state='playing';
+};
+
+// ═══════════════ CANVAS ═══════════════
+let canvas,ctx,W,H;
+function resize(){canvas=document.getElementById('game');W=canvas.width=innerWidth;H=canvas.height=innerHeight;ctx=canvas.getContext('2d');}
+window.addEventListener('resize',resize);
+
+// ═══════════════ LOAD SKINS ═══════════════
+let loaded=0;
+['skins/skin0.jpg','skins/skin1.jpg','skins/skin2.jpg','skins/skin3.jpg'].forEach(f=>{
+  const img=new Image();
+  img.onload=img.onerror=()=>{loaded++;if(loaded===4)initMenu();};
+  img.src=f;imgs.push(img);
+});
+setTimeout(()=>{if(loaded<4){loaded=4;initMenu();}},2000);
+
+// ═══════════════ START ═══════════════
+resize();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

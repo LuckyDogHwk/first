@@ -1,6 +1,19 @@
 # Visual Studio
 .vs/
 
+# 编译产物
+x64/
+*.obj
+*.pdb
+*.tlog
+*.ilk
+*.exe
+*.recipe
+*.log
+*.lastbuildstate
+*.idb
+*.ipch
+
 # SFML 文档（几百个 HTML，不需要）
 third_party/SFML-2.6.2/doc/
 
