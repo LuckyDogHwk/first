@@ -204,10 +204,15 @@ function absorbThorn(b,t){
   const maxSplit=Math.min(CFG.ThornSplit,slots-1); // 留 1 个位置给中心球
   const totalBalls=1+maxSplit;
 
-  // 按比例分配质量
-  const mf=Math.min(1,(tm-10000)/50000);
-  const cr=1/9+(.9-1/9)*Math.max(0,mf);
-  let cm=tm*cr,sm=maxSplit>0?(tm-cm)/maxSplit:0;
+  // 按可创建球数分配质量：中心球比例随分身数量动态调整
+   const mf=Math.min(1,(tm-10000)/50000);
+   let cr=1/9+(.9-1/9)*Math.max(0,mf); // 原始中心占 11%~90%
+   // 如果分身数量比预设的 8 个少，中心球吃下剩余质量
+   if(maxSplit<CFG.ThornSplit){
+     cr=1-(1-cr)*(maxSplit/CFG.ThornSplit); // 线性调整：分身越少中心占比越高
+     if(maxSplit===0)cr=1; // 没有分身，中心吃全部
+   }
+   let cm=tm*cr,sm=maxSplit>0?(tm-cm)/maxSplit:0;
   cm=Math.max(cm,CFG.MinBallMass);if(sm>0)sm=Math.max(sm,CFG.MinBallMass);
   if(maxSplit>0){const sc=(cm+sm*maxSplit)/tm;cm/=sc;sm/=sc;}
 
