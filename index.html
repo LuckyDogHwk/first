@@ -339,9 +339,10 @@ function updateWorld(dt,tx,ty){
 // ═══════════════ RENDER ═══════════════
 function drawBall(x,y,r,c,n,isSpore,sk){
   ctx.save();ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.closePath();
-  if(sk>=0&&sk<imgs.length&&imgs[sk].complete&&!isSpore){ctx.save();ctx.clip();ctx.drawImage(imgs[sk],x-r,y-r,r*2,r*2);ctx.globalAlpha=.15;ctx.fillStyle=c;ctx.fill();ctx.restore();}
-  else ctx.fillStyle=c;
-  ctx.fill();ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=Math.max(1,r*.04);ctx.stroke();
+  const hasSkin=sk>=0&&sk<imgs.length&&imgs[sk].complete&&!isSpore;
+  if(hasSkin){ctx.save();ctx.clip();ctx.drawImage(imgs[sk],x-r,y-r,r*2,r*2);ctx.globalAlpha=.15;ctx.fillStyle=c;ctx.fill();ctx.restore();}
+  ctx.fillStyle=c;ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=Math.max(1,r*.04);ctx.stroke();
   if(n&&r>18&&!isSpore){
     const fs=clp(r*.35,12,28);
     ctx.font=`bold ${fs}px "Microsoft YaHei","SimHei",sans-serif`;
@@ -418,7 +419,7 @@ function loop(ts){
     updateWorld(dt,tx,ty);
 
     const nc=pCenter();
-    const tz=clp(1/(pMass()/2000+1),.3,1.2);
+    const m=pMass(),baseW=Math.max(W,1500),tz=clp(W/(baseW+m*0.25),.35,1.1);
     zm+=(tz-zm)*Math.min(1,dt*3);
     render(nc.x,nc.y,zm);
   }
