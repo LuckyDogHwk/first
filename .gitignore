@@ -1,0 +1,17 @@
+# Visual Studio
+.vs/
+
+# SFML 文档（几百个 HTML，不需要）
+third_party/SFML-2.6.2/doc/
+
+# SFML 源码（你只需要 DLL，源码不需要）
+third_party/SFML-2.6.2/include/
+third_party/SFML-2.6.2/lib/
+third_party/SFML-2.6.2/cmake/
+third_party/SFML-2.6.2/examples/
+third_party/SFML-2.6.2/extlibs/
+third_party/SFML-2.6.2/src/
+third_party/SFML-2.6.2/tools/
+third_party/SFML-2.6.2/license.md
+third_party/SFML-2.6.2/readme.md
+third_party/SFML-2.6.2/changelog.md
